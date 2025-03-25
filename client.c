@@ -6,9 +6,11 @@
 #include <pthread.h>
 #include <libwebsockets.h>
 #include "cJSON.h"
+#include <sys/time.h>
 
 #define MAX_PAYLOAD 2048
 #define RECONNECT_DELAY 5
+#define MAX_RECONNECT_ATTEMPTS 5
 
 // Estados del cliente
 #define STATE_CONNECTING 0
@@ -19,6 +21,7 @@
 // Actualiza esta IP con la dirección de tu nueva instancia EC2
 char *server_ip = NULL;
 int server_port = 8080;
+int reconnect_attempts = 0;
 
 // Nombre de usuario
 char username[50];
@@ -38,8 +41,9 @@ pthread_cond_t cond_established = PTHREAD_COND_INITIALIZER;
 unsigned char rx_buffer[LWS_PRE + MAX_PAYLOAD];
 unsigned int rx_buffer_len = 0;
 
-// Flag para controlar si el programa está ejecutándose
+// Flags para controlar la ejecución del programa
 volatile int is_running = 1;
+volatile int force_reconnect = 0;
 
 // Función para generar timestamp
 void get_timestamp(char *timestamp, size_t size) {
@@ -443,6 +447,9 @@ void process_message(const char *message, size_t len) {
 // Callback para WebSocket
 static int callback_chat(struct lws *wsi, enum lws_callback_reasons reason, 
                         void *user, void *in, size_t len) {
+    static struct timeval last_ping_time;
+    struct timeval now;
+    
     switch (reason) {
         case LWS_CALLBACK_CLIENT_ESTABLISHED:
             printf("Conexión establecida con el servidor\n");
@@ -451,6 +458,14 @@ static int callback_chat(struct lws *wsi, enum lws_callback_reasons reason,
             pthread_mutex_lock(&lock_established);
             pthread_cond_signal(&cond_established);
             pthread_mutex_unlock(&lock_established);
+            
+            // Resetear contador de reconexiones al establecer conexión
+            reconnect_attempts = 0;
+            
+            // Inicializar tiempo del último ping
+            gettimeofday(&last_ping_time, NULL);
+            
+            web_socket = wsi;
             
             // Enviar mensaje de registro
             send_register_message(wsi);
@@ -468,15 +483,36 @@ static int callback_chat(struct lws *wsi, enum lws_callback_reasons reason,
             }
             break;
             
+        // Añadir manejo de temporizadores para enviar pings y mantener la conexión activa
+        case LWS_CALLBACK_TIMER:
+            gettimeofday(&now, NULL);
+            if (now.tv_sec - last_ping_time.tv_sec > 30) { // Enviar ping cada 30 segundos
+                unsigned char ping[LWS_PRE + 10];
+                memcpy(&ping[LWS_PRE], "ping", 4);
+                lws_write(wsi, &ping[LWS_PRE], 4, LWS_WRITE_PING);
+                
+                gettimeofday(&last_ping_time, NULL);
+            }
+            break;
+            
         case LWS_CALLBACK_CLIENT_CLOSED:
             printf("Conexión cerrada\n");
             web_socket = NULL;
             
             // Si todavía estamos ejecutando la aplicación, intentar reconectar
             if (is_running) {
-                printf("Intentando reconectar en %d segundos...\n", RECONNECT_DELAY);
-                sleep(RECONNECT_DELAY);
-                client_state = STATE_CONNECTING;
+                reconnect_attempts++;
+                printf("Intento de reconexión %d/%d en %d segundos...\n", 
+                       reconnect_attempts, MAX_RECONNECT_ATTEMPTS, RECONNECT_DELAY);
+                
+                if (reconnect_attempts > MAX_RECONNECT_ATTEMPTS) {
+                    printf("\nMáximo número de intentos de reconexión alcanzado (%d)\n", MAX_RECONNECT_ATTEMPTS);
+                    printf("Verifica la IP y puerto del servidor e inténtalo de nuevo\n");
+                    is_running = 0;
+                } else {
+                    sleep(RECONNECT_DELAY);
+                    client_state = STATE_CONNECTING;
+                }
             }
             break;
             
@@ -493,9 +529,18 @@ static int callback_chat(struct lws *wsi, enum lws_callback_reasons reason,
             
             // Intentar reconectar
             if (is_running) {
-                printf("Intentando reconectar en %d segundos...\n", RECONNECT_DELAY);
-                sleep(RECONNECT_DELAY);
-                client_state = STATE_CONNECTING;
+                reconnect_attempts++;
+                printf("Intento de reconexión %d/%d en %d segundos...\n", 
+                       reconnect_attempts, MAX_RECONNECT_ATTEMPTS, RECONNECT_DELAY);
+                
+                if (reconnect_attempts > MAX_RECONNECT_ATTEMPTS) {
+                    printf("\nMáximo número de intentos de reconexión alcanzado (%d)\n", MAX_RECONNECT_ATTEMPTS);
+                    printf("Verifica la IP y puerto del servidor e inténtalo de nuevo\n");
+                    is_running = 0;
+                } else {
+                    sleep(RECONNECT_DELAY);
+                    client_state = STATE_CONNECTING;
+                }
             }
             break;
             
@@ -668,9 +713,10 @@ int main(int argc, char **argv) {
             ip_len--;
         }
         
-        // Si no se ingresó nada, usar localhost
+        // Si no se ingresó nada, usar la IP de la instancia EC2
         if (ip_len == 0) {
-            server_ip = strdup("localhost");
+            server_ip = strdup("54.226.96.100");
+            printf("Usando la IP de la instancia EC2 por defecto: %s\n", server_ip);
         } else {
             server_ip = strdup(server_ip_buffer);
         }
@@ -707,6 +753,11 @@ int main(int argc, char **argv) {
     info.protocols = protocols;
     info.gid = -1;
     info.uid = -1;
+    info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+    info.timeout_secs = 10; // Timeout más corto para detectar problemas de conexión más rápido
+    info.ka_time = 30;      // Keep-alive cada 30 segundos
+    info.ka_interval = 5;   // Intervalos de 5 segundos
+    info.ka_probes = 3;     // 3 intentos antes de considerar la conexión perdida
     
     // Crear contexto
     context = lws_create_context(&info);
@@ -730,15 +781,35 @@ int main(int argc, char **argv) {
             ccinfo.host = lws_canonical_hostname(context);
             ccinfo.origin = "origin";
             ccinfo.protocol = "chat-protocol";
+            ccinfo.ssl_connection = 0; // No usar SSL/TLS para esta conexión
             
             printf("Conectando a %s:%d...\n", server_ip, server_port);
             web_socket = lws_client_connect_via_info(&ccinfo);
             
             if (!web_socket) {
                 printf("Error al iniciar conexión\n");
-                sleep(RECONNECT_DELAY);
+                reconnect_attempts++;
+                if (reconnect_attempts > MAX_RECONNECT_ATTEMPTS) {
+                    printf("No se pudo establecer conexión después de %d intentos\n", MAX_RECONNECT_ATTEMPTS);
+                    printf("Verifica que el servidor esté ejecutándose en %s:%d\n", server_ip, server_port);
+                    printf("Comprueba que el servidor esté escuchando en todas las interfaces (0.0.0.0) y no solo en localhost\n");
+                    is_running = 0;
+                } else {
+                    printf("Intento de reconexión %d/%d en %d segundos...\n", 
+                           reconnect_attempts, MAX_RECONNECT_ATTEMPTS, RECONNECT_DELAY);
+                    sleep(RECONNECT_DELAY);
+                }
                 continue;
             }
+        }
+        
+        // Servicio LWS con manejo de reconexiones
+        if (force_reconnect && web_socket) {
+            printf("Forzando reconexión...\n");
+            lws_callback_on_writable(web_socket); // Flush mensajes pendientes
+            web_socket = NULL;
+            force_reconnect = 0;
+            continue;
         }
         
         // Servicio LWS
