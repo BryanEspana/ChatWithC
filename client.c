@@ -58,18 +58,19 @@ void get_timestamp(char *timestamp, size_t size) {
 
 // Enviar mensaje de registro al servidor
 void send_register_message(struct lws *wsi) {
-    // Crear mensaje JSON
+    // Crear mensaje JSON simplificado - solo envía los campos absolutamente necesarios
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", "register");
     cJSON_AddStringToObject(root, "sender", username);
-    cJSON_AddStringToObject(root, "content", "");
     
-    char timestamp[30];
-    get_timestamp(timestamp, sizeof(timestamp));
-    cJSON_AddStringToObject(root, "timestamp", timestamp);
+    // Dejamos fuera el campo content y timestamp para simplificar el mensaje
+    // y evitar posibles problemas de compatibilidad
     
     // Convertir a string
     char *json_str = cJSON_Print(root);
+    
+    // Imprimir mensaje de depuración
+    printf("DEBUG - Mensaje de registro: %s\n", json_str);
     
     // Preparar buffer para envío
     unsigned char buf[LWS_PRE + MAX_PAYLOAD];
@@ -715,7 +716,7 @@ int main(int argc, char **argv) {
         
         // Si no se ingresó nada, usar la IP de la instancia EC2
         if (ip_len == 0) {
-            server_ip = strdup("54.226.96.100");
+            server_ip = strdup("52.207.239.8");
             printf("Usando la IP de la instancia EC2 por defecto: %s\n", server_ip);
         } else {
             server_ip = strdup(server_ip_buffer);

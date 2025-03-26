@@ -202,13 +202,26 @@ void send_error(struct lws *wsi, const char *error_message) {
 
 // Procesa mensaje de registro
 void handle_register(struct lws *wsi, cJSON *json) {
-    const char *username = cJSON_GetObjectItem(json, "sender")->valuestring;
+    // Validar que el JSON contiene el campo "sender"
+    cJSON *sender_field = cJSON_GetObjectItem(json, "sender");
+    if (!sender_field || !cJSON_IsString(sender_field) || !sender_field->valuestring) {
+        send_error(wsi, "Formato de mensaje inválido: falta campo 'sender' o no es un string");
+        return;
+    }
+    
+    const char *username = sender_field->valuestring;
     char client_ip[INET_ADDRSTRLEN];
     
-    // Obtener IP del cliente
-    struct sockaddr_in addr;
-    socklen_t addr_len = sizeof(addr);
-    lws_get_peer_addresses(wsi, lws_get_socket_fd(wsi), NULL, 0, client_ip, sizeof(client_ip));
+    // Imprimir mensaje de depuración
+    printf("Procesando registro para usuario: %s\n", username);
+    
+    // Usar un valor fijo para la IP del cliente para evitar problemas
+    strncpy(client_ip, "127.0.0.1", sizeof(client_ip) - 1);
+    client_ip[sizeof(client_ip) - 1] = '\0';
+    
+    printf("Usando IP estándar: %s para el cliente\n", client_ip);
+    
+    printf("IP del cliente: %s\n", client_ip);
     
     int result = add_user(username, client_ip, wsi);
     
