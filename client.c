@@ -20,7 +20,7 @@
 // Información del servidor
 // Actualiza esta IP con la dirección de tu nueva instancia EC2
 char *server_ip = NULL;
-int server_port = 8080;
+int server_port = 8081;
 int reconnect_attempts = 0;
 
 // Nombre de usuario
@@ -394,34 +394,25 @@ void process_message(const char *message, size_t len) {
     } else if (strcmp(type, "private") == 0) {
         printf("\n[PRIVADO] [%s] %s: %s\n", timestamp, sender, content);
     } else if (strcmp(type, "list_users_response") == 0) {
-        printf("\n=====================================================\n");
-        printf("               LISTA DE USUARIOS                  \n");
-        printf("=====================================================\n");
-        printf("%-20s %-20s %-10s\n", "USUARIO", "IP", "ESTADO");
-        printf("-----------------------------------------------------\n");
-        
+        printf("\nLista de usuarios:\n");
         cJSON *users = content_item;
         if (users && cJSON_IsArray(users)) {
             int size = cJSON_GetArraySize(users);
             for (int i = 0; i < size; i++) {
-                cJSON *user_obj = cJSON_GetArrayItem(users, i);
-                if (user_obj && cJSON_IsObject(user_obj)) {
-                    cJSON *username_item = cJSON_GetObjectItem(user_obj, "username");
-                    cJSON *ip_item = cJSON_GetObjectItem(user_obj, "ip");
-                    cJSON *status_item = cJSON_GetObjectItem(user_obj, "status");
-                    
-                    const char *username = (username_item && cJSON_IsString(username_item)) ? 
-                                          username_item->valuestring : "<desconocido>";
-                    const char *ip = (ip_item && cJSON_IsString(ip_item)) ? 
-                                     ip_item->valuestring : "<desconocida>";
-                    const char *status = (status_item && cJSON_IsString(status_item)) ? 
-                                         status_item->valuestring : "<desconocido>";
-                    
-                    printf("%-20s %-20s %-10s\n", username, ip, status);
+                cJSON *user_item = cJSON_GetArrayItem(users, i);
+                // Intentamos primero si es un objeto (formato nuevo)
+                if (user_item && cJSON_IsObject(user_item)) {
+                    cJSON *username_item = cJSON_GetObjectItem(user_item, "username");
+                    if (username_item && cJSON_IsString(username_item)) {
+                        printf("  - %s\n", username_item->valuestring);
+                    }
+                }
+                // Si no es objeto, podría ser un string directo (formato antiguo)
+                else if (user_item && cJSON_IsString(user_item)) {
+                    printf("  - %s\n", user_item->valuestring);
                 }
             }
         }
-        printf("=====================================================\n");
     } else if (strcmp(type, "user_info_response") == 0) {
         const char *target = "";
         cJSON *target_item = cJSON_GetObjectItem(json, "target");
