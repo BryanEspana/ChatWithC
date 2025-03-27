@@ -69,9 +69,6 @@ void send_register_message(struct lws *wsi) {
     // Convertir a string
     char *json_str = cJSON_Print(root);
     
-    // Imprimir mensaje de depuración
-    printf("DEBUG - Mensaje de registro: %s\n", json_str);
-    
     // Preparar buffer para envío
     unsigned char buf[LWS_PRE + MAX_PAYLOAD];
     size_t json_len = strlen(json_str);
@@ -136,6 +133,9 @@ void send_broadcast_message(struct lws *wsi, const char *message) {
     
     if (n < json_len) {
         printf("Error al enviar mensaje\n");
+    } else {
+        // Mostrar el mensaje enviado localmente para que el usuario vea su propio mensaje
+        printf("\n[TÚ] [%s]: %s\n", timestamp, message);
     }
     
     cJSON_Delete(root);
@@ -146,7 +146,7 @@ void send_broadcast_message(struct lws *wsi, const char *message) {
 void send_private_message(struct lws *wsi, const char *target, const char *message) {
     // Crear mensaje JSON
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "type", "private");
+    cJSON_AddStringToObject(root, "type", "broadcast");
     cJSON_AddStringToObject(root, "sender", username);
     cJSON_AddStringToObject(root, "target", target);
     cJSON_AddStringToObject(root, "content", message);
@@ -178,6 +178,9 @@ void send_private_message(struct lws *wsi, const char *target, const char *messa
     
     if (n < json_len) {
         printf("Error al enviar mensaje privado\n");
+    } else {
+        // Mostrar el mensaje enviado localmente para que el usuario vea su propio mensaje privado
+        printf("\n[PRIVADO a %s] [%s]: %s\n", target, timestamp, message);
     }
     
     cJSON_Delete(root);
@@ -391,17 +394,34 @@ void process_message(const char *message, size_t len) {
     } else if (strcmp(type, "private") == 0) {
         printf("\n[PRIVADO] [%s] %s: %s\n", timestamp, sender, content);
     } else if (strcmp(type, "list_users_response") == 0) {
-        printf("\nLista de usuarios:\n");
+        printf("\n=====================================================\n");
+        printf("               LISTA DE USUARIOS                  \n");
+        printf("=====================================================\n");
+        printf("%-20s %-20s %-10s\n", "USUARIO", "IP", "ESTADO");
+        printf("-----------------------------------------------------\n");
+        
         cJSON *users = content_item;
         if (users && cJSON_IsArray(users)) {
             int size = cJSON_GetArraySize(users);
             for (int i = 0; i < size; i++) {
-                cJSON *user_item = cJSON_GetArrayItem(users, i);
-                if (user_item && cJSON_IsString(user_item)) {
-                    printf("  - %s\n", user_item->valuestring);
+                cJSON *user_obj = cJSON_GetArrayItem(users, i);
+                if (user_obj && cJSON_IsObject(user_obj)) {
+                    cJSON *username_item = cJSON_GetObjectItem(user_obj, "username");
+                    cJSON *ip_item = cJSON_GetObjectItem(user_obj, "ip");
+                    cJSON *status_item = cJSON_GetObjectItem(user_obj, "status");
+                    
+                    const char *username = (username_item && cJSON_IsString(username_item)) ? 
+                                          username_item->valuestring : "<desconocido>";
+                    const char *ip = (ip_item && cJSON_IsString(ip_item)) ? 
+                                     ip_item->valuestring : "<desconocida>";
+                    const char *status = (status_item && cJSON_IsString(status_item)) ? 
+                                         status_item->valuestring : "<desconocido>";
+                    
+                    printf("%-20s %-20s %-10s\n", username, ip, status);
                 }
             }
         }
+        printf("=====================================================\n");
     } else if (strcmp(type, "user_info_response") == 0) {
         const char *target = "";
         cJSON *target_item = cJSON_GetObjectItem(json, "target");
