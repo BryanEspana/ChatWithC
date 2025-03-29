@@ -734,7 +734,7 @@ int main(int argc, char *argv[]) {
     // Iniciar thread para verificar inactividad
     pthread_t inactivity_thread;
     InactivityParams *params = malloc(sizeof(InactivityParams));
-    params->check_interval = 60;  // Verificar cada 60 segundos
+    params->check_interval = 10;  // Verificar cada 60 segundos
     
     if (pthread_create(&inactivity_thread, NULL, check_inactivity, params) != 0) {
         printf("Error al crear thread de inactividad\n");

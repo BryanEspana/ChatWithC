@@ -20,7 +20,7 @@
 // Información del servidor
 // Actualiza esta IP con la dirección de tu nueva instancia EC2
 char *server_ip = NULL;
-int server_port = 8081;
+int server_port = 8080;
 int reconnect_attempts = 0;
 
 // Nombre de usuario
@@ -62,9 +62,6 @@ void send_register_message(struct lws *wsi) {
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", "register");
     cJSON_AddStringToObject(root, "sender", username);
-    
-    // Dejamos fuera el campo content y timestamp para simplificar el mensaje
-    // y evitar posibles problemas de compatibilidad
     
     // Convertir a string
     char *json_str = cJSON_Print(root);
